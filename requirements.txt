@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+sqlalchemy
+# databases
+pymysql
+# mysql-connector-python
+# async-exit-stack
+# async-generator
+# passlib[bcrypt]
+# python-jose[cryptography]
+# python-multipart
+python-dotenv
+pytz
