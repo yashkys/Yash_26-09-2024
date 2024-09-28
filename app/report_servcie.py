@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from .log import *
 from dotenv import load_dotenv
 import os, csv, tempfile, uuid
+from multiprocessing import Process
 
 
 
@@ -94,7 +95,9 @@ def generate_csv_file(report_id, csv_data):
 
 def trigger_report_creation():
     report_id = str(uuid.uuid4())
-    create_report(report_id)
+    process_report = Process(target=create_report, args=(report_id,))
+    process_report.start()
+    # create_report(report_id)
     return report_id
 
 
@@ -183,13 +186,6 @@ def calculate_time_for_last_hour(zonal_datetime: datetime, timezone, report_data
     for poll in polls:
         warningLog(f"-----Store ID: {poll.store_id}, Timestamp UTC: {poll.timestamp_utc}, Status: {poll.status}")
 
-    
-    # print(polls)
-    # print("Start time:", one_hour_before_time_utc)
-    # print("End time:", current_time_utc)
-    # print("Business Start time:", business_start_time_utc)
-    # print("Business End time:", business_end_time_utc)
-
     warningLog(f"Converted to utc time : {one_hour_before_time_utc} to {current_time_utc}")
     calculated_time = calculate_uptime_and_downtime_in_minutes(polls, one_hour_before_time_utc, current_time_utc)
     report_data.uptime_last_hour = calculated_time[0]
@@ -264,21 +260,30 @@ def calculate_uptime_and_downtime_in_minutes( polls: List[PollData],
                                               business_end_time_utc: datetime) -> List[float]:
     uptime = 0
     total = 0
-
-    end_time = convert_timestamp_to_utc(business_end_time_utc)
+    start_time = datetime.fromisoformat(f"{business_start_time_utc}")# convert_timestamp_to_utc(business_start_time_utc)
+    print(f"Current start time for calculation : {start_time}")
+    end_time = datetime.fromisoformat(f"{business_end_time_utc}")# convert_timestamp_to_utc(business_end_time_utc)
     print(f"End time for calculation : {end_time}")
+    total = abs((end_time - start_time).total_seconds()) / 60  # Total minutes
+    print(f"Total time for calculation : {total} in minutes")
 
     if polls:
-        current = convert_timestamp_to_utc(polls[0].timestamp_utc)
-        print(f"Current start time for calculation : {current}")
+        current = polls[0].timestamp_utc# datetime.fromisoformat(f"{polls[0].timestamp_utc}")# convert_timestamp_to_utc(polls[0].timestamp_utc)
+        if current.tzinfo is None:  # Check if current is naive
+            current = current.replace(tzinfo=timezone.utc)
+        print(f"Current Poll start time : {current}")
         total = abs((end_time - current).total_seconds()) / 60  # Total minutes
 
         last_status = polls[0].status  # Assume inactive if not explicitly mentioned at start
 
         for poll in polls:
-            poll_time = convert_timestamp_to_utc(poll.timestamp_utc)
+            print(f"Time of current poll in list : {poll.timestamp_utc}")#, TZInfo : {(poll.timestamp_utc).tzinfo}")
+            # poll_time = datetime.fromisoformat(f"{poll.timestamp_utc}")# convert_timestamp_to_utc(poll.timestamp_utc)
+            poll_time = poll.timestamp_utc
+            poll_time = poll_time.replace(tzinfo=timezone.utc)
             minutes_between = abs((poll_time - current).total_seconds()) / 60  # Minutes between
             print(f"Time between {poll_time} and {current}: {minutes_between} for status {poll.status}")
+            print(f"Poll Time TZ Info: {poll_time.tzinfo}, Current Time TZ Info: {current.tzinfo}")
 
             # Update uptime/downtime based on the last known status
             if last_status == StoreStatus.ACTIVE:
@@ -286,6 +291,8 @@ def calculate_uptime_and_downtime_in_minutes( polls: List[PollData],
             
             # Update the current time and status
             current = poll_time
+            # if current.tzinfo is None:  # Check if current is naive
+            #     current = current.replace(tzinfo=timezone.utc)
             last_status = poll.status
 
         # Handle the remaining time until the end of the business hours
@@ -298,48 +305,45 @@ def calculate_uptime_and_downtime_in_minutes( polls: List[PollData],
             if last_status == StoreStatus.ACTIVE:
                 uptime += remaining_minutes
 
-    else:
-        start_time = convert_timestamp_to_utc(business_start_time_utc)
-        total = abs((end_time - start_time).total_seconds()) / 60  # Total minutes
-
-    downtime = total - uptime
+    downtime = abs(total - uptime)
     return [uptime, downtime]
 
-def calculate_uptime_and_downtime_in_minutes_with_start_end(polls: List[PollData], 
-                                                             start_time: datetime, 
-                                                             end_time: datetime) -> List[float]:
-    uptime = 0
-    total = 0
 
-    if polls:
-        current = convert_timestamp_to_utc(polls[0].timestamp_utc)
-        total = abs((end_time - current).total_seconds()) / 60  # Total minutes
+# def calculate_uptime_and_downtime_in_minutes_with_start_end(polls: List[PollData], 
+#                                                              start_time: datetime, 
+#                                                              end_time: datetime) -> List[float]:
+#     uptime = 0
+#     total = 0
 
-        last_status = polls[0].status  # Assume inactive if not explicitly mentioned at start
+#     if polls:
+#         current = convert_timestamp_to_utc(polls[0].timestamp_utc)
+#         total = abs((end_time - current).total_seconds()) / 60  # Total minutes
 
-        for poll in polls:
-            poll_time = convert_timestamp_to_utc(poll.timestamp_utc)
-            minutes_between = abs((poll_time - current).total_seconds()) / 60  # Minutes between
+#         last_status = polls[0].status  # Assume inactive if not explicitly mentioned at start
+
+#         for poll in polls:
+#             poll_time = convert_timestamp_to_utc(poll.timestamp_utc)
+#             minutes_between = abs((poll_time - current).total_seconds()) / 60  # Minutes between
             
-            # Update uptime/downtime based on the last known status
-            if last_status == StoreStatus.ACTIVE:
-                uptime += minutes_between
+#             # Update uptime/downtime based on the last known status
+#             if last_status == StoreStatus.ACTIVE:
+#                 uptime += minutes_between
 
-            # Update the current time and status
-            current = poll_time
-            last_status = poll.status
+#             # Update the current time and status
+#             current = poll_time
+#             last_status = poll.status
 
-        # Handle the remaining time until the end of the specified period
-        if current < end_time:
-            remaining_duration = abs((end_time - current).total_seconds())
-            remaining_minutes = remaining_duration.total_seconds() / 60  # Remaining minutes
+#         # Handle the remaining time until the end of the specified period
+#         if current < end_time:
+#             remaining_duration = abs((end_time - current).total_seconds())
+#             remaining_minutes = remaining_duration.total_seconds() / 60  # Remaining minutes
             
-            # Only add remaining minutes if the last status was active
-            if last_status == StoreStatus.ACTIVE:
-                uptime += remaining_minutes
+#             # Only add remaining minutes if the last status was active
+#             if last_status == StoreStatus.ACTIVE:
+#                 uptime += remaining_minutes
 
-    else:
-        total = abs((end_time - start_time).total_seconds()) / 60  # Total minutes
+#     else:
+#         total = abs((end_time - start_time).total_seconds()) / 60  # Total minutes
 
-    downtime = total - uptime
-    return [uptime, downtime]
+#     downtime = total - uptime
+#     return [uptime, downtime]

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 def infoLog(msg):
+    return
     print(f"INFO : {datetime.now()} : {msg}")
 
     
@@ -13,4 +14,5 @@ def errorLog(msg):
     
     
 def successLog(msg):
+    return 
     print(f"SUCCESS : {datetime.now()} : {msg}")

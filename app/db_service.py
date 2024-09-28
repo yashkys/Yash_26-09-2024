@@ -49,7 +49,6 @@ def fetch_report_status(report_id) -> ReportStatus :
     return ReportStatusInfo.RUNNING
 
 
-
 def fetch_report_data(report_id) -> List[ReportData] :
     db = SessionLocal()
     report = []
@@ -174,9 +173,13 @@ def fetch_poll_data_for_any_date_within_business_hours(store_id: int,
     start_time = business_start_time_utc.time()
     end_time = business_end_time_utc.time()
     query1 = text("""SELECT * FROM poll_data WHERE store_id = :store_id  
-                AND (DATE(timestamp_utc) > :start_date OR (DATE(timestamp_utc) = :start_date AND TIME(timestamp_utc) >= :start_time)) 
-                AND (DATE(timestamp_utc) < :end_date OR (DATE(timestamp_utc) = :end_date AND TIME(timestamp_utc) <= :end_time))  
+                  AND (DATE(timestamp_utc) >= :start_date)
+                  AND (DATE(timestamp_utc) <= :end_date)
+                  AND (TIME(timestamp_utc) >= :start_time)
+                  AND (TIME(timestamp_utc) <= :end_time)
                 ORDER BY TIME(timestamp_utc) ASC""")
+                # AND (DATE(timestamp_utc) > :start_date OR (DATE(timestamp_utc) = :start_date AND TIME(timestamp_utc) >= :start_time)) 
+                # AND (DATE(timestamp_utc) < :end_date OR (DATE(timestamp_utc) = :end_date AND TIME(timestamp_utc) <= :end_time))  
     params = {
             "store_id" : store_id,
             "start_date" : start_date, # DATE(timestamp_utc) > startDate
@@ -215,13 +218,6 @@ def fetch_poll_data_for_any_date_within_business_hours(store_id: int,
                 status=row.status
             )
             results.append(poll_data)
-        print(f"Polls count : {len(results)}")
-        # for r in res :
-        #     print(r)
-        #     r_id = r[0]
-        #     poll_timestamp_utc = r[1]
-        #     poll_status = r[2]
-        #     results.append(PollData(r_id ,store_id,poll_timestamp_utc,poll_status)) 
     except Exception as e:
         errorLog(f"Exception while fetching poll data: {e}")
     
@@ -294,11 +290,16 @@ def fetch_poll_data_between_two_times(
             end_date = end_time_in_utc.date()
             start_time = start_time_in_utc.time()
             end_time = end_time_in_utc.time()
-    print(f"Fetching  polls between ({start_date} {start_time} to {end_date} {end_time})")
+    print(f"-----------------------Fetching  polls for store id: {store_id} where BusinessHours: ({business_start_time_utc}, {business_end_time_utc}) \nbetween ({start_date} {start_time} to {end_date} {end_time})")
     query1 = text("""SELECT * FROM poll_data WHERE store_id = :store_id  
-                AND (DATE(timestamp_utc) > :start_date OR (DATE(timestamp_utc) = :start_date AND TIME(timestamp_utc) >= :start_time)) 
-                AND (DATE(timestamp_utc) < :end_date OR (DATE(timestamp_utc) = :end_date AND TIME(timestamp_utc) <= :end_time))  
+                  AND (DATE(timestamp_utc) >= :start_date)
+                  AND (DATE(timestamp_utc) <= :end_date)
+                  AND (TIME(timestamp_utc) >= :start_time)
+                  AND (TIME(timestamp_utc) <= :end_time)
                 ORDER BY TIME(timestamp_utc) ASC""")
+    # AND (DATE(timestamp_utc) > :start_date OR (DATE(timestamp_utc) = :start_date AND TIME(timestamp_utc) >= :start_time)) 
+    #             AND (DATE(timestamp_utc) < :end_date OR (DATE(timestamp_utc) = :end_date AND TIME(timestamp_utc) <= :end_time))  
+                
     params = {
             "store_id" : store_id,
             "start_date" : start_date, # DATE(timestamp_utc) > startDate
@@ -337,18 +338,13 @@ def fetch_poll_data_between_two_times(
                 status=row.status
             )
             results.append(poll_data)
-        print(f"Polls count : {len(results)}")
-        # for r in res :
-        #     print(f"poll -> {r}")
-        #     r_id = r[0]
-        #     poll_timestamp_utc = r[1]
-        #     poll_status = r[2]
-        #     results.append(PollData(r_id ,store_id,poll_timestamp_utc,poll_status))
     except Exception as e:
         errorLog(f"Exception while fetching poll data: {e}")
 
     # Edge case logic
     if not results:
+        status = fetch_status_of_last_poll_before_the_time(store_id, start_time_in_utc)
+        results.append(PollData(store_id=store_id, timestamp_utc=start_time_in_utc, status=status))
         return results
     try:
         first_entry = results[0]
@@ -359,8 +355,8 @@ def fetch_poll_data_between_two_times(
         if first_entry.timestamp_utc.time() > start_time:
             status = fetch_status_of_last_poll_before_the_time(store_id, start_time_in_utc)
             results.insert(0, PollData(id=poll_id, store_id=store_id, 
-                                        timestamp_utc=start_time_in_utc, status=status))
-        infoLog(f"Fetched polls (store_id = {store_id})")
+                                        timestamp_utc=start_time_in_utc, status=status)) 
+        # infoLog(f"Fetched polls (store_id = {store_id})")
     except Exception as e:
         errorLog(f"Exception : {e}")
     return results
@@ -374,7 +370,7 @@ def fetch_status_of_last_poll_before_the_time(store_id: int, business_start_time
                 ORDER BY timestamp_utc DESC LIMIT 1""")
     params = {
         "store_id" : store_id,
-        "timestamp_utc" : business_start_time_utc.timestamp()
+        "timestamp_utc" : business_start_time_utc #.timestamp()
     }
     query = select(PollData.status).where(
         PollData.store_id == store_id,
@@ -383,12 +379,12 @@ def fetch_status_of_last_poll_before_the_time(store_id: int, business_start_time
 
     # with db() as session:
     try:
-        result = db.execute(query1,params).scalar_one_or_none()
+        result = db.execute(query1,params).scalar_one()
         if result:
             status = result
     except Exception as e:
         errorLog(f"Exception while fetching status: {e}")
-    infoLog(f"Fetched last poll status before {business_start_time_utc} for (store_id = {store_id})")
+    infoLog(f"Fetched last poll status(status = {status}) before {business_start_time_utc} for (store_id = {store_id})")
     return status
 
 
